@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PoE Tracker Web</title>
+<style>
+  :root{
+    --bg:#121216; --panel:#16161c; --panel2:#1c1c24; --panel3:#23232d; --line:#3c3c46;
+    --text:#dcdcdc; --muted:#9090a0; --gold:#ffc832; --green:#50ff78; --red:#ff7878;
+  }
+  * { box-sizing:border-box; }
+  body{ margin:0; font-family:"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--text); }
+  .app{ max-width:880px; min-height:100vh; margin:0 auto; padding:10px; }
+  .top{ background:var(--bg); padding:6px 0 8px; position:sticky; top:0; z-index:10; }
+  .title{ text-align:center; color:var(--gold); font-size:30px; font-weight:700; margin:4px 0 0; }
+  .subtitle{ text-align:center; color:var(--muted); font-size:12px; margin:2px 0 8px; min-height:14px; }
+  .toolbar{ display:flex; gap:4px; align-items:center; margin:0 10px; }
+  select, button, input[type="text"]{ height:30px; border:1px solid var(--line); background:var(--panel3); color:var(--text); border-radius:0; font-size:14px; }
+  select{ flex:1; padding:0 10px; outline:none; }
+  button{ width:32px; cursor:pointer; }
+  button.wide{ width:auto; padding:0 12px; }
+  .sep{ height:1px; background:#2d2d37; margin:4px 20px 6px; }
+  .grand{ text-align:center; color:var(--green); font-weight:700; font-size:24px; line-height:38px; }
+  .checkrow{ text-align:center; color:#b9b9cd; margin-bottom:8px; user-select:none; }
+  .checkrow input{ vertical-align:middle; }
+  .scroll{ background:var(--bg); padding-bottom:20px; }
+  .group{ background:var(--panel); margin:0 0 8px; border:1px solid #1a1a20; }
+  .group-head{ position:relative; min-height:74px; padding:4px 12px 8px; }
+  .toggle{ position:absolute; left:8px; top:8px; width:28px; height:24px; border:1px solid var(--line); background:var(--panel3); color:#d2d2e1; cursor:pointer; }
+  .group-title{ text-align:center; color:#ebebf5; font-size:22px; font-weight:700; line-height:28px; padding:0 36px; }
+  .group-total{ text-align:center; color:var(--gold); font-size:26px; font-weight:700; line-height:28px; margin-top:2px; }
+  .group-body{ background:var(--bg); padding:0 6px 6px; }
+  .row{ height:30px; background:var(--panel2); margin-top:4px; display:flex; align-items:center; justify-content:space-between; padding:0 10px; }
+  .row-name{ width:62%; color:#b9b9cd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+  .row-name.inactive{ color:#5a5a6c; }
+  .row-amount{ width:34%; text-align:right; color:var(--gold); font-size:18px; font-weight:700; }
+  .row-amount.inactive{ color:#464655; }
+  .row-amount.negative, .group-total.negative, .grand.negative{ color:var(--red); }
+  .status{ margin:8px 10px; font-size:12px; color:var(--muted); line-height:1.5; }
+  .modal-wrap{ position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:999; }
+  .modal{ width:min(92vw,720px); background:#1b1b22; border:1px solid var(--line); padding:14px; }
+  .modal h3{ margin:0 0 10px; color:var(--gold); }
+  .modal label{ display:block; margin:10px 0 4px; color:#b9b9cd; }
+  .modal input, .modal textarea{ width:100%; background:#2a2a33; color:#eee; border:1px solid var(--line); padding:8px; font-family:Consolas,monospace; }
+  .modal textarea{ min-height:260px; resize:vertical; }
+  .modal-actions{ margin-top:10px; display:flex; gap:6px; justify-content:flex-end; }
+  .hint{ color:#a7a7b8; font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="title">⚓ PoE Tracker</div>
+    <div class="subtitle" id="subtitle">No pirate set</div>
+    <div class="toolbar">
+      <select id="periodSelect"></select>
+      <button id="nameBtn" title="Set Pirate Name">⚙</button>
+      <button id="fileBtn" class="wide" title="Choose Chat Log">📁</button>
+      <button id="cfgBtn" title="Edit Config">✏</button>
+    </div>
+    <div class="sep"></div>
+    <div class="grand" id="grandTotal">0 PoE</div>
+    <div class="checkrow">
+      <label><input type="checkbox" id="includeSold" checked> Include Sold Doubloons in Grand Total</label>
+    </div>
+    <div class="status" id="status">Choose your chat log to begin.</div>
+  </div>
+  <div class="scroll" id="groups"></div>
+</div>
+
+<div class="modal-wrap" id="modalWrap">
+  <div class="modal">
+    <h3 id="modalTitle">Edit</h3>
+    <div id="modalContent"></div>
+    <div class="modal-actions">
+      <button class="wide" id="modalCancel">Cancel</button>
+      <button class="wide" id="modalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const DEFAULT_GROUPS = [
+  { name: "Pillaging", categories: ["Booty Initial", "Booty", "Lavish Lockers", "Buried Chests", "Foraging", "Treasure Haul", "Trade Runs"] },
+  { name: "Sea Monster Hunts", categories: ["Haunted Seas", "Atlantis", "Cursed Isles", "Kraken Hunt"] },
+  { name: "Navy/Labour", categories: ["Labour", "Employer Wages", "Navy Wages"] },
+  { name: "Artifacts/Greedy", categories: ["Greedy Purses", "Piggy Banks"] },
+  { name: "Blockade/Flotilla", categories: ["Blockade", "Flotilla"] },
+  { name: "Parlor/Monster Frays", categories: ["Poker", "Tournaments", "Parlor games/Monster Frays"] },
+  { name: "Sold Doubloons", categories: ["Sold Doubloons"] }
+];
+
+const DEFAULT_PERIODS = [
+  { label: "Last 10 Minutes", secs: 600 },
+  { label: "Last Hour", secs: 3600 },
+  { label: "Last 24 Hours", secs: 86400 },
+  { label: "Last 7 Days", secs: 604800 },
+  { label: "Last 30 Days", secs: 2592000 },
+  { label: "Last 90 Days", secs: 7776000 },
+  { label: "All Time", secs: -1 }
+];
+
+const DEFAULT_IGNORE = [
+  "says,","tells ye,","shouts,","whispers,","global chats,","trade chats,",
+  "crew chats,","flag chats,","officer chats,","greeter chats,","event chats,"
+];
+
+const DEFAULT_PATTERN_LINES = [
+  String.raw`Booty Initial|Ye received ([\d,]+) pieces of eight as your initial cut of the booty!`,
+  String.raw`Booty|You received ([\d,]+) pieces of eight as your cut of the booty!`,
+  String.raw`Booty|{PIRATE} received the restocking cut of ([\d,]+) pieces of eight\.`,
+  String.raw`Lavish Lockers|Ye received ([\d,]+) pieces of eight from lavish lockers!`,
+  String.raw`Buried Chests|Ye received ([\d,]+) pieces of eight from buried chests!`,
+  String.raw`Foraging|Ye were paid ([\d,]+) pieces of eight fer yer foraging\.`,
+  String.raw`Treasure Haul|Ye received ([\d,]+) pieces of eight from treasure recently hauled aboard!`,
+  String.raw`Trade Runs|([\d,]+) pieces of eight were paid for dutying on a trade voyage\.`,
+  String.raw`Haunted Seas|Ye received ([\d,]+) pieces of eight from haunted chests!`,
+  String.raw`Atlantis|Ye received ([\d,]+) pieces of eight from Atlantean chests!`,
+  String.raw`Cursed Isles|Ye received ([\d,]+) pieces of eight from cursed chests!`,
+  String.raw`Kraken Hunt|Ye received ([\d,]+) pieces of eight from kraken chests!`,
+  String.raw`Labour|Ye receive ([\d,]+) pieces of eight for your work\.`,
+  String.raw`Labour|Fine work, pirate! Ye've been paid ([\d,]+) pieces of eight\.`,
+  String.raw`Employer Wages|Yer landlubbin' employers pay ye ([\d,]+) pieces of eight\.`,
+  String.raw`Navy Wages|You have been paid ([\d,]+) pieces of eight for your work aboard a navy vessel\.`,
+  String.raw`Greedy Purses|Ye slash open the purse to find ([\d,]+) pieces of eight`,
+  String.raw`Piggy Banks|Ye shatter the golden container and find ([\d,]+) pieces of eight!`,
+  String.raw`Piggy Banks|Ye shatter the piggy and find ([\d,]+) pieces of eight!`,
+  String.raw`Piggy Banks|Ye savagely tear apart the wrapped box and find ([\d,]+) pieces of eight!`,
+  String.raw`Piggy Banks|Ye break the heart over yer knee and ([\d,]+) pieces of eight spill out!`,
+  String.raw`Piggy Banks|Ye smash yer punkin' and find ([\d,]+) pieces of eight`,
+  String.raw`Blockade|Ye were paid ([\d,]+) pieces of eight fer yer efforts in the blockade\.`,
+  String.raw`Flotilla|Yer portion of the bounty for sinking this ship is ([\d,]+) pieces of eight!`,
+  String.raw`Poker|{PIRATE} bought in for ([\d,]+) pieces of eight`,
+  String.raw`Poker|{PIRATE} rebought for ([\d,]+) pieces of eight`,
+  String.raw`Poker|{PIRATE} cashed out with ([\d,]+) pieces of eight`,
+  String.raw`Poker|Ye cashed out with ([\d,]+) pieces of eight`,
+  String.raw`Tournaments|Ye have won ([\d,]+) pieces of eight in the tournament!`,
+  String.raw`Parlor games/Monster Frays|{PIRATE} wins ([\d,]+) pieces of eight\.`,
+  String.raw`Sold Doubloons|You have received ([\d,]+) pieces of eight as the result of a doubloon trade\.`
+];
+
+const STORAGE_KEY = "poe_tracker_web_settings_v1";
+let logHandle = null;
+let pollTimer = null;
+let latestRecords = [];
+let config = loadSettings();
+let modalSaveHandler = null;
+
+const periodSelect = document.getElementById("periodSelect");
+const subtitle = document.getElementById("subtitle");
+const grandTotal = document.getElementById("grandTotal");
+const includeSold = document.getElementById("includeSold");
+const groupsRoot = document.getElementById("groups");
+const statusEl = document.getElementById("status");
+const modalWrap = document.getElementById("modalWrap");
+const modalTitle = document.getElementById("modalTitle");
+const modalContent = document.getElementById("modalContent");
+const modalCancel = document.getElementById("modalCancel");
+const modalSave = document.getElementById("modalSave");
+
+function loadSettings(){
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+  return {
+    pirateName: saved.pirateName || "",
+    includeSoldDoubloonsInGrand: saved.includeSoldDoubloonsInGrand !== false,
+    selectedPeriod: saved.selectedPeriod || "Last 7 Days",
+    collapsed: saved.collapsed || {},
+    pollMs: saved.pollMs || 3000,
+    patternsText: saved.patternsText || DEFAULT_PATTERN_LINES.join("\n"),
+    ignoreText: saved.ignoreText || DEFAULT_IGNORE.join("\n"),
+    periodsText: saved.periodsText || DEFAULT_PERIODS.map(p => `${p.label}|${p.secs}`).join("\n"),
+    lastFileName: saved.lastFileName || ""
+  };
+}
+function saveSettings(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); }
+
+function parsePeriods(){
+  const lines = config.periodsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const out = [];
+  for (const line of lines){
+    const i = line.indexOf("|");
+    if (i <= 0 || i >= line.length - 1) continue;
+    const label = line.slice(0, i).trim();
+    const val = Number(line.slice(i + 1).trim());
+    if (!label || Number.isNaN(val)) continue;
+    out.push({ label, secs: val });
+  }
+  return out.length ? out : DEFAULT_PERIODS.slice();
+}
+function buildPeriods(){
+  periodSelect.innerHTML = "";
+  parsePeriods().forEach(p => {
+    const opt = document.createElement("option");
+    opt.value = p.label;
+    opt.textContent = p.label;
+    periodSelect.appendChild(opt);
+  });
+  periodSelect.value = config.selectedPeriod;
+  if (periodSelect.value !== config.selectedPeriod && periodSelect.options.length){
+    periodSelect.selectedIndex = Math.min(3, periodSelect.options.length - 1);
+    config.selectedPeriod = periodSelect.value;
+    saveSettings();
+  }
+}
+function parseIgnore(){ return config.ignoreText.split(/\r?\n/).map(s => s.trim()).filter(Boolean); }
+function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function compilePatterns(){
+  const out = [];
+  const lines = config.patternsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  for (const line of lines){
+    const i = line.indexOf("|");
+    if (i <= 0 || i >= line.length - 1) continue;
+    const cat = line.slice(0, i).trim();
+    let pat = line.slice(i + 1).trim();
+    const rawPattern = pat;
+    if (config.pirateName) pat = pat.replaceAll("{PIRATE}", escapeRegex(config.pirateName));
+    try { out.push({ cat, regex: new RegExp(pat, "i"), rawPattern }); } catch (err) { console.warn("Pattern failed:", line, err); }
+  }
+  return out;
+}
+function formatNumber(n){ return Number(n || 0).toLocaleString(); }
+
+function buildGroups(){
+  groupsRoot.innerHTML = "";
+  for (const group of DEFAULT_GROUPS){
+    const wrap = document.createElement("div");
+    wrap.className = "group";
+    wrap.dataset.group = group.name;
+    wrap.innerHTML = `
+      <div class="group-head">
+        <button class="toggle">${config.collapsed[group.name] ? "+" : "−"}</button>
+        <div class="group-title">${group.name}</div>
+        <div class="group-total" data-role="group-total">0</div>
+      </div>
+      <div class="group-body"></div>
+    `;
+    const body = wrap.querySelector(".group-body");
+    for (const cat of group.categories){
+      const row = document.createElement("div");
+      row.className = "row";
+      row.dataset.cat = cat;
+      row.innerHTML = `<div class="row-name">${cat}</div><div class="row-amount">0</div>`;
+      body.appendChild(row);
+    }
+    wrap.querySelector(".toggle").addEventListener("click", () => {
+      config.collapsed[group.name] = !config.collapsed[group.name];
+      saveSettings();
+      renderTotals(latestRecords);
+    });
+    groupsRoot.appendChild(wrap);
+  }
+}
+
+function renderTotals(records){
+  const periods = parsePeriods();
+  const period = periods.find(p => p.label === config.selectedPeriod) || periods[0] || {secs:-1};
+  const cutoff = period.secs === -1 ? new Date(0) : new Date(Date.now() - period.secs * 1000);
+  const filtered = records.filter(r => r.timestamp >= cutoff);
+  const totals = new Map();
+  for (const rec of filtered){
+    const prev = totals.get(rec.category) || { tot: 0, cnt: 0 };
+    prev.tot += rec.amount; prev.cnt += 1; totals.set(rec.category, prev);
+  }
+  let grand = 0;
+  for (const rec of filtered){
+    if (!config.includeSoldDoubloonsInGrand && rec.category.toLowerCase() === "sold doubloons") continue;
+    grand += rec.amount;
+  }
+  grandTotal.textContent = `${formatNumber(grand)} PoE`;
+  grandTotal.classList.toggle("negative", grand < 0);
+
+  for (const groupEl of [...groupsRoot.querySelectorAll(".group")]){
+    const group = DEFAULT_GROUPS.find(g => g.name === groupEl.dataset.group);
+    const body = groupEl.querySelector(".group-body");
+    const toggle = groupEl.querySelector(".toggle");
+    const collapsed = !!config.collapsed[group.name];
+    body.style.display = collapsed ? "none" : "";
+    toggle.textContent = collapsed ? "+" : "−";
+    let groupTotal = 0;
+    for (const row of [...groupEl.querySelectorAll(".row")]){
+      const cat = row.dataset.cat;
+      const data = totals.get(cat) || { tot: 0, cnt: 0 };
+      groupTotal += data.tot;
+      const name = row.querySelector(".row-name");
+      const amount = row.querySelector(".row-amount");
+      name.classList.toggle("inactive", data.tot === 0 && data.cnt === 0);
+      amount.classList.toggle("inactive", data.tot === 0 && data.cnt === 0);
+      amount.classList.toggle("negative", data.tot < 0);
+      amount.textContent = formatNumber(data.tot);
+    }
+    const totalEl = groupEl.querySelector('[data-role="group-total"]');
+    totalEl.textContent = formatNumber(groupTotal);
+    totalEl.classList.toggle("negative", groupTotal < 0);
+  }
+}
+
+function makeRecord(tm, dateLine, dateRx, amtStr, cat, negative){
+  if (!dateLine) return null;
+  const dm = dateRx.exec(dateLine);
+  if (!dm) return null;
+  let amount = Number(String(amtStr).replaceAll(",", ""));
+  if (!Number.isFinite(amount)) return null;
+  if (negative) amount = -amount;
+  const ts = new Date(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]), Number(tm[3]));
+  return { timestamp: ts, amount, category: cat };
+}
+function parseRecords(text){
+  const patterns = compilePatterns();
+  const ignore = parseIgnore();
+  const lines = text.split(/\r?\n/);
+  const timeRx = /\[(\d+):(\d+):(\d+)\]/;
+  const dateRx = /(\d{4})\/(\d{1,2})\/(\d{1,2})/;
+  let currentDate = null;
+  const records = [];
+  for (let rawLine of lines){
+    const line = rawLine.replace(/[\r\n ]+$/g, "");
+    if (!line) continue;
+    if (line.includes("======")){ currentDate = line; continue; }
+    if (!line.startsWith("[")) continue;
+    const tm = timeRx.exec(line);
+    if (!tm) continue;
+    let skip = false;
+    for (const phrase of ignore){ if (line.toLowerCase().includes(phrase.toLowerCase())) { skip = true; break; } }
+    if (skip) continue;
+    for (const p of patterns){
+      const m = p.regex.exec(line);
+      if (!m || m.length < 2) continue;
+      const negative = p.cat.toLowerCase() === "poker" &&
+        (p.rawPattern.toLowerCase().includes("bought in for") ||
+         p.rawPattern.toLowerCase().includes("rebought for") ||
+         line.toLowerCase().includes(" bought in for ") ||
+         line.toLowerCase().includes(" rebought for "));
+      const rec = makeRecord(tm, currentDate, dateRx, m[1], p.cat, negative);
+      if (rec) records.push(rec);
+      break;
+    }
+  }
+  return records;
+}
+async function readChatLog(){
+  if (!logHandle) return;
+  try{
+    const file = await logHandle.getFile();
+    const text = await file.text();
+    latestRecords = parseRecords(text);
+    renderTotals(latestRecords);
+    statusEl.textContent = `Watching: ${file.name} • Auto-refresh every ${Math.round(config.pollMs / 1000)}s • ${latestRecords.length.toLocaleString()} matched entries`;
+    config.lastFileName = file.name;
+    saveSettings();
+  } catch(err){
+    statusEl.textContent = "Could not re-read the selected file. Pick it again if needed.";
+    console.error(err);
+  }
+}
+async function chooseFile(){
+  if (!window.showOpenFilePicker){
+    alert("This works best in Chrome or Edge. Your browser may not support choosing a file handle for re-reading.");
+    return;
+  }
+  try{
+    const [handle] = await window.showOpenFilePicker({
+      multiple:false,
+      excludeAcceptAllOption:false,
+      types:[{ description:"Chat Logs", accept:{ "text/plain":[".txt",".log"], "application/octet-stream":[".*"] } }]
+    });
+    logHandle = handle;
+    await readChatLog();
+    startPolling();
+  } catch(err){
+    if (err && err.name !== "AbortError") console.error(err);
+  }
+}
+function startPolling(){ stopPolling(); pollTimer = setInterval(readChatLog, config.pollMs); }
+function stopPolling(){ if (pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+function escapeHtml(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+function openModal(title, build, onSave){
+  modalTitle.textContent = title; modalContent.innerHTML = ""; build(modalContent); modalSaveHandler = onSave; modalWrap.style.display = "flex";
+}
+function closeModal(){ modalWrap.style.display = "none"; modalSaveHandler = null; }
+function openNameModal(){
+  openModal("Set Pirate Name", root => {
+    root.innerHTML = `<label>Pirate Name</label><input type="text" id="modalPirateName" value="${escapeHtml(config.pirateName || "")}"><div class="hint">Used for patterns like poker buy-in, rebuy, cash out, and wins.</div>`;
+  }, () => {
+    config.pirateName = document.getElementById("modalPirateName").value.trim();
+    subtitle.textContent = config.pirateName || "No pirate set";
+    saveSettings(); readChatLog(); closeModal();
+  });
+}
+function openConfigModal(){
+  openModal("Edit Config", root => {
+    root.innerHTML = `
+      <label>Periods (Label|Seconds)</label><textarea id="modalPeriods">${escapeHtml(config.periodsText)}</textarea>
+      <label>Ignore Phrases (one per line)</label><textarea id="modalIgnore">${escapeHtml(config.ignoreText)}</textarea>
+      <label>Patterns (Category|Regex)</label><textarea id="modalPatterns">${escapeHtml(config.patternsText)}</textarea>
+      <label>Auto-refresh milliseconds</label><input type="text" id="modalPoll" value="${escapeHtml(String(config.pollMs))}">
+      <div class="hint">After saving, the website rebuilds periods and re-parses the selected log.</div>`;
+  }, () => {
+    config.periodsText = document.getElementById("modalPeriods").value.trim();
+    config.ignoreText = document.getElementById("modalIgnore").value.trim();
+    config.patternsText = document.getElementById("modalPatterns").value.trim();
+    const poll = Number(document.getElementById("modalPoll").value.trim());
+    config.pollMs = Number.isFinite(poll) && poll >= 500 ? poll : 3000;
+    buildPeriods(); saveSettings(); startPolling(); readChatLog(); closeModal();
+  });
+}
+modalCancel.addEventListener("click", closeModal);
+modalSave.addEventListener("click", () => { if (typeof modalSaveHandler === "function") modalSaveHandler(); });
+modalWrap.addEventListener("click", e => { if (e.target === modalWrap) closeModal(); });
+document.getElementById("nameBtn").addEventListener("click", openNameModal);
+document.getElementById("cfgBtn").addEventListener("click", openConfigModal);
+document.getElementById("fileBtn").addEventListener("click", chooseFile);
+periodSelect.addEventListener("change", () => { config.selectedPeriod = periodSelect.value; saveSettings(); renderTotals(latestRecords); });
+includeSold.addEventListener("change", () => { config.includeSoldDoubloonsInGrand = includeSold.checked; saveSettings(); renderTotals(latestRecords); });
+
+function init(){
+  subtitle.textContent = config.pirateName || "No pirate set";
+  includeSold.checked = config.includeSoldDoubloonsInGrand;
+  buildPeriods(); buildGroups(); renderTotals([]);
+  statusEl.textContent = config.lastFileName ? `Last file used: ${config.lastFileName}. Click 📁 to choose it again.` : "Choose your chat log to begin.";
+}
+init();
+</script>
+</body>
+</html>
