@@ -574,6 +574,7 @@ function parseRecords(text){
   return records;
 }
 
+<script>
 async function readChatLog(){
   if (!logHandle && !fallbackFile) return;
 
@@ -600,7 +601,9 @@ async function readChatLog(){
     console.error(err);
   }
 }
+</script>
 
+</script>
 async function chooseFile(){
   try{
     if (window.showOpenFilePicker){
@@ -634,6 +637,7 @@ async function chooseFile(){
 
       fallbackFile = file;
       logHandle = null;
+
       const text = await file.text();
       latestRecords = parseRecords(text);
       renderTotals(latestRecords);
@@ -650,7 +654,8 @@ async function chooseFile(){
     statusEl.textContent = "Could not open the chat log.";
   }
 }
-
+</script>
+  
 function startPolling(){
   stopPolling();
   pollTimer = setInterval(readChatLog, config.pollMs);
